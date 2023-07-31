@@ -1,6 +1,4 @@
-use std::f32::consts::E;
-
-use syn::{Ident, Type, Visibility, Field, Fields, punctuated::Iter, __private::{quote::{spanned::Spanned, quote}, Span, TokenStream2}, Expr, parse::{Parse, Parser}, FieldValue, parse_quote, ItemFn, PathArguments, GenericArgument};
+use syn::{Ident, Type, Visibility, Field, Fields, punctuated::Iter, __private::{quote::{quote, spanned::Spanned}, Span, TokenStream2, ToTokens}, parse::{Parse, Parser}, FieldValue, parse_quote, ItemFn, PathArguments, GenericArgument};
 
 pub struct FieldInfo<'a> {
     name: Option<&'a Ident>,
@@ -11,8 +9,9 @@ pub struct FieldInfo<'a> {
     is_vec: bool,
 }
 
+#[derive(Debug)]
 pub struct FieldAttr {
-    name: String,
+    _name: String,
     value: String,
 }
 
@@ -33,35 +32,25 @@ impl<'a> FieldInfo<'a> {
 
         for attr in attrs {
             let meta = &attr.meta;
-            let exp = match meta {
-                syn::Meta::List(list) => {
-                    let exp = Expr::parse.parse2(list.tokens.clone())?;
-                    match exp {
-                        Expr::Assign(assign_expr) => {
-                            let left = stringify!(assign_expr.left);
-                            if !left.eq("each") {
-                                return Err(syn::Error::new(meta.__span(), "expected 'builder(each = ...)'"));
-                            }
+            let require_list = meta.require_list()?;
+            let args = require_list.parse_args::<syn::ExprAssign>()?;
+            let left_token = args.left.into_token_stream();
+            let left_ident = <syn::Ident as Parse>::parse.parse2(left_token)?;
+            let left = left_ident.to_string();
 
-                            let right = stringify!(assign_expr.right);
-                            (left, right)
-                        },
-                        _ => {
-                            return Err(syn::Error::new(meta.__span(), "the field attribute format error, expect: each = ..."));
-                        }
-                    }
-                },
-                _ => {
-                    return Err(syn::Error::new(meta.__span(), "the field attribute format error, expect: each = ..."));
-                }
-            };
+            if !left.eq("each") {
+                return Err(syn::Error::new(left_ident.__span(), "expected `builder(each = \"...\")`"));
+            }
 
-            let (name, value) = exp;
+
+            let right_token = args.right.into_token_stream();
+            let right_lit = <syn::LitStr as Parse>::parse.parse2(right_token)?;
+            let right = right_lit.value();
+
             let field_attr = FieldAttr {
-                name: name.to_owned(),
-                value: value.to_owned()
+                _name: left,
+                value: right
             };
-
             field_attrs.push(field_attr);
         }
 
@@ -144,7 +133,7 @@ pub fn gen_builder_field(field_stream: &FieldStream) -> Result<Vec<Field>, syn::
             })?;
         } else {
             builder_field = Field::parse_named.parse2(quote! {
-               #vis #name: Option<#ty>
+               #vis #name: std::option::Option<#ty>
             })?;
         }
 
@@ -168,7 +157,7 @@ pub fn gen_builder_field_default_value(field_stream: &FieldStream) -> Result<Vec
         }
         let name = name.unwrap();
         let field_value: FieldValue = parse_quote! {
-            #name: None
+            #name: std::option::Option::None
         };
 
         field_values.push(field_value);
@@ -207,16 +196,24 @@ pub fn gen_field_method(field_stream: &FieldStream) -> Result<Vec<ItemFn>, syn::
         } else {
             for attr in attrs.iter() {
                 let attr_value = &attr.value;
-                let fn_item = if name.ne(attr_value) {
-                    gen_builder_field_method(name, ty, visi, is_option)
+                if name.ne(attr_value) {
+                   if let Some(f) = gen_builder_field_method(name, ty, visi, is_option) {
+                    methods.push(f);
+                   }
+                  
+                   let each_name = Ident::new(attr_value.as_str(), Span::call_site());
+                   if let Some(f) = gen_each_field_method(name, &each_name, ty, visi, is_vec) {
+                    methods.push(f);
+                   }
+                 
+
                 } else {
                     let each_name = Ident::new(attr_value.as_str(), Span::call_site());
-                    gen_each_field_method(name, &each_name, ty, visi, is_vec)
+                    if let Some(f) = gen_each_field_method(name, &each_name, ty, visi, is_vec) {
+                        methods.push(f);
+                    }
                 };
-                if fn_item.is_none() {
-                    continue;
-                } 
-                methods.push(fn_item.unwrap());
+               
             }
 
         }
@@ -227,7 +224,7 @@ pub fn gen_field_method(field_stream: &FieldStream) -> Result<Vec<ItemFn>, syn::
     Ok(methods)
 }
 
-pub fn gen_builder_mathoe(target: &Ident, field_stream: &FieldStream) -> Result<ItemFn, syn::Error> {
+pub fn gen_builder_method(target: &Ident, field_stream: &FieldStream) -> Result<ItemFn, syn::Error> {
 
     let mut tokens: Vec<TokenStream2> = Vec::default();
     let mut field_names: Vec<&Ident> = Vec::default();
@@ -246,13 +243,13 @@ pub fn gen_builder_mathoe(target: &Ident, field_stream: &FieldStream) -> Result<
 
         if is_option {
             let token = quote! {
-                let #name = self.#name;
+                let #name = self.#name.take();
             };
             tokens.push(token);
         } else if !attrs.is_empty() {
             let token = quote! {
                 let #name = if self.#name.is_none() {
-                    Vec::default()
+                    std::vec::Vec::default()
                 } else {
                     self.#name.take().unwrap()
                 };
@@ -262,7 +259,7 @@ pub fn gen_builder_mathoe(target: &Ident, field_stream: &FieldStream) -> Result<
             let token = quote! {
                 if self.#name.is_none() {
                     let err_msg = format!("{} field missing", stringify!(#name));
-                    return Err(Box::<dyn std::error::Error>::from(err_msg.to_string()));
+                    return std::result::Result::Err(std::boxed::Box::<dyn std::error::Error>::from(err_msg.to_string()));
                 }
 
                 let #name = self.#name.take().unwrap();
@@ -273,13 +270,17 @@ pub fn gen_builder_mathoe(target: &Ident, field_stream: &FieldStream) -> Result<
     }
 
     let fn_item: ItemFn = parse_quote! {
-        pub fn build(&mut self) -> #target {
-          
+        pub fn build(&mut self) -> std::result::Result<#target, std::boxed::Box<dyn std::error::Error>>{
+            #(#tokens)*
+            let target = #target {
+                #(#field_names),*
+            };
 
+            std::result::Result::Ok(target)
         }
     };
 
-    todo!()
+   Ok(fn_item)
 }
 
 fn gen_each_field_method(name: &Ident, each_name: &Ident, ty: &Type, visi: &Visibility, is_vec: bool) -> Option<ItemFn> {
@@ -298,12 +299,12 @@ fn gen_each_field_method(name: &Ident, each_name: &Ident, ty: &Type, visi: &Visi
     let item_fn: ItemFn = parse_quote! {
         #visi fn #each_name(&mut self, #each_name: #inner_ty) -> &mut Self {
             let mut vec = if self.#name.is_none() {
-                Vec::default()
+                std::vec::Vec::default()
             } else {
                 self.#name.take().unwrap()
             };
             vec.push(#each_name);
-            self.#name = Some(vec);
+            self.#name = std::option::Option::Some(vec);
             self
         }
     };
@@ -324,7 +325,7 @@ fn gen_builder_field_method(name: &Ident, ty: &Type, visi: &Visibility, is_optio
          
          let item_fn: ItemFn = parse_quote! {
              #visi fn #name(&mut self, #name: #inner_ty) -> &mut Self {
-                 self.#name = Some(#name);
+                 self.#name = std::option::Option::Some(#name);
                  self
              }
          };
@@ -334,7 +335,7 @@ fn gen_builder_field_method(name: &Ident, ty: &Type, visi: &Visibility, is_optio
      } else {
          let item_fn: ItemFn = parse_quote! {
              #visi fn #name(&mut self, #name: #ty) -> &mut Self {
-                 self.#name = Some(#name);
+                 self.#name = std::option::Option::Some(#name);
                  self
              }
          };

@@ -1,9 +1,9 @@
-use syn::{__private::{TokenStream2, quote::quote, ToTokens}, DeriveInput, LitStr, Fields, punctuated::Iter, Field, Ident, Type, Visibility, parse::{Parse, Parser}, Data, parse_quote, PathArguments, GenericArgument};
+use syn::{__private::{TokenStream2, quote::quote, ToTokens}, DeriveInput, LitStr, Fields, punctuated::Iter, Field, Ident, Type, parse::{Parse, Parser}, Data, parse_quote};
 
 pub fn impl_debug(input: &DeriveInput) -> Result<TokenStream2, syn::Error> {
     let name  = &input.ident;
     let generics = &input.generics;
-
+    let struct_attrs: &Vec<syn::Attribute> = &input.attrs;
     
 
     let fields = match &input.data {
@@ -23,7 +23,7 @@ pub fn impl_debug(input: &DeriveInput) -> Result<TokenStream2, syn::Error> {
     let exp_lets = gen_debug_field_exp(&field_stream)?;
 
     let params: Vec<&syn::TypeParam> = generics.type_params().collect();
-    let gen_where_clause = gen_where_clause(params, &field_stream)?;
+    let gen_where_clause = gen_where_clause(struct_attrs, params, &field_stream)?;
     let (_, ty_generics, _) = generics.split_for_impl();
     
     let token = quote! {
@@ -39,65 +39,150 @@ pub fn impl_debug(input: &DeriveInput) -> Result<TokenStream2, syn::Error> {
    Ok(token)
 }
 
-fn gen_where_clause(type_params: Vec<&syn::TypeParam>, field_stream: &FieldStream) -> Result<syn::WhereClause, syn::Error>  {
+fn gen_where_clause(struct_attrs: &Vec<syn::Attribute>, type_params: Vec<&syn::TypeParam>, field_stream: &FieldStream) -> Result<syn::WhereClause, syn::Error>  {
 
     let mut where_clause: syn::WhereClause = parse_quote! {
         where
     };
 
-    let type_param: Vec<String> =  type_params.iter().map(|t|t.ident.to_string()).collect();
-
-    let where_predicates = gen_where_predicate(type_param, field_stream)?;
+    let where_predicates = gen_where_predicates(type_params, field_stream, struct_attrs)?;
 
     for where_predicate in where_predicates {
         where_clause.predicates.push(where_predicate);
     }
 
+    // let where_predicates = gen_where_predicates_for_attr(struct_attrs)?;
+
+    // for where_predicate in where_predicates {
+    //     where_clause.predicates.push(where_predicate);
+    // } 
 
     Ok(where_clause)
 }
 
-
-fn gen_where_predicate(type_param: Vec<String>, field_stream: &FieldStream) -> Result<Vec<syn::WherePredicate>, syn::Error> {
+fn gen_where_predicates(type_params: Vec<&syn::TypeParam>, field_stream: &FieldStream, struct_attrs: &Vec<syn::Attribute>) -> Result<Vec<syn::WherePredicate>, syn::Error> {
     
+    let type_param_str: Vec<String> =  type_params.iter().map(|t|t.ident.to_string()).collect();
+
     let mut type_vec: Vec<String> = Vec::default();
     let mut vec: Vec<syn::WherePredicate> = Vec::default();
+
+
+    for type_param in type_params.iter() {
+        let is_empty = type_param.bounds.is_empty();
+        if is_empty {
+          continue;  
+        }
+
+        let where_predicate: syn::WherePredicate = parse_quote! {
+            #type_param
+        };
+
+        vec.push(where_predicate);
+    }
+
+    let where_predicates_for_attr = gen_where_predicates_for_attr(struct_attrs)?;
+
+    if !where_predicates_for_attr.is_empty() {
+        vec.extend(where_predicates_for_attr);
+        return Ok(vec);
+    }
+
     for field in field_stream.iter() {
         let field = field?;
         let ty = field.ty;
 
-        let where_predicate = find_generics_type(&type_param, ty);
-        if where_predicate.is_none() {
+        let where_predicates = gen_where_predicates_for_every_field(&type_param_str, ty);
+        if where_predicates.is_none() {
             continue;
         }
         
-        let (where_predicate, type_string) = where_predicate.unwrap();
-       
-        if !type_vec.contains(&type_string) {
-            vec.push(where_predicate);
-            type_vec.push(type_string);
+        let where_predicates = where_predicates.unwrap();
+
+        if where_predicates.is_empty() {
+            continue;
         }
 
+        for (where_predicate, type_string) in where_predicates {
+            if !type_vec.contains(&type_string) {
+                vec.push(where_predicate);
+                type_vec.push(type_string);
+            }
+        }
     }
+
+   
 
     Ok(vec)
 }
 
-fn find_generics_type(type_param: &Vec<String>, ty: &Type) -> Option<(syn::WherePredicate, String)> {
+
+
+fn gen_where_predicates_for_attr(struct_attrs: &Vec<syn::Attribute>) -> Result<Vec<syn::WherePredicate>, syn::Error>{
+    let mut where_predicates: Vec<syn::WherePredicate>= Vec::default();
+    for attr in struct_attrs {
+        let meta = &attr.meta;
+        let list = meta.require_list()?;
+        let tokens = &list.tokens;
+        let exp_assign: syn::ExprAssign = parse_quote! {
+            #tokens
+        };
+        
+        let left = &exp_assign.left;
+
+        let left_ident: Ident = parse_quote! {
+            #left
+        };
+
+        let left_str = left_ident.to_string();
+        if !left_str.eq("bound") {
+            continue;
+        }
+
+        let right = &exp_assign.right;
+        let right_str: LitStr = parse_quote! {
+            #right
+        };
+        
+        let token = right_str.parse().unwrap();
+        let where_predicate = syn::WherePredicate::parse.parse2(token)?;
+
+        where_predicates.push(where_predicate);
+    }
+
+    Ok(where_predicates)
+}
+
+
+fn gen_where_predicates_for_every_field(type_param: &Vec<String>, ty: &Type) -> Option<Vec<(syn::WherePredicate, String)>> {
+    let mut predicates: Vec<(syn::WherePredicate, String)> = Vec::default();
     match ty {
         syn::Type::Path(path) => {
             let path = &path.path;
             let ident = path.get_ident();
             
             if ident.is_none() {
-                let inner_type = get_inner_type(ty);
-                if inner_type.is_none() {
+                let inner_types = get_inner_types(ty);
+                if inner_types.is_none() {
                     return None;
                 }
-                let inner_type = inner_type.unwrap();
- 
+                let inner_types = inner_types.unwrap();
+                if inner_types.is_empty() {
+                    let (is_associated_type, type_str) = is_associated_type(type_param, ty);
+                    if is_associated_type {
+                        let where_predicate: syn::WherePredicate = parse_quote! {
+                            #ty: std::fmt::Debug
+                        };
+                        predicates.push((where_predicate, type_str));
+                        return Some(predicates);
+                    }
+                    return None;
+                }
+
+                
                 let ph_data_field = ty_eq(ty, "PhantomData");
                 if  ph_data_field {
+                    let inner_type = inner_types.first().unwrap();
                     let inner_type_str = type_to_ident_str(inner_type);
                     if  inner_type_str.is_none(){
                         return None;
@@ -108,31 +193,52 @@ fn find_generics_type(type_param: &Vec<String>, ty: &Type) -> Option<(syn::Where
                         let where_predicate: syn::WherePredicate = parse_quote! {
                             std::marker::PhantomData<#inner_type>: std::fmt::Debug
                         };
-                        return Some((where_predicate, inner_type_str));
+                        predicates.push((where_predicate, inner_type_str));
+                        return Some(predicates);
                     } else {
                         return None;
                     }
                 }
-                return find_generics_type(type_param, inner_type);
+
+                for inner_type in inner_types {
+                    let ret = gen_where_predicates_for_every_field(type_param, inner_type);
+                    if ret.is_none() {
+                        continue;
+                    }
+                    let ret = ret.unwrap();
+                    predicates.extend(ret);
+
+                }
+                return Some(predicates);
             }
            
             let ident = ident.unwrap();
             let ident_str = ident.to_string();
             let contain = type_param.contains(&ident_str);
             if contain {
-            
                 let where_predicate: syn::WherePredicate = parse_quote! {
                     #ty: std::fmt::Debug
                 };
-                return Some((where_predicate, ident_str));
+                predicates.push((where_predicate, ident_str));
+                return Some(predicates);
             } else {
+                let (is_associated_type, _) = is_associated_type(type_param, ty);
+                if is_associated_type {
+                    let where_predicate: syn::WherePredicate = parse_quote! {
+                        #ty: std::fmt::Debug
+                    };
+                    predicates.push((where_predicate, ident_str));
+                    return Some(predicates);
+                }
                return None
             }
 
         },
         _ => return None
     }
+
 }
+
 
 fn type_to_ident_str(ty: &Type) -> Option<String> {
     match ty {
@@ -194,9 +300,7 @@ fn gen_debug_field_exp(field_stream: &FieldStream) -> Result<Vec<syn::ExprLet>, 
 pub struct FieldInfo<'a> {
     name: Option<&'a Ident>,
     ty: &'a Type,
-    vis: &'a Visibility,
     attrs: Vec<FieldAttr>,
-    is_phantom_data_field: bool,
 }
 
 #[derive(Debug)]
@@ -210,11 +314,7 @@ impl<'a> FieldInfo<'a> {
     pub fn new(field: &'a Field) -> Result<Self, syn::Error> {
         let name: Option<&Ident> = field.ident.as_ref();
         let ty: &Type = &field.ty;
-
-        let vis: &Visibility = &field.vis;
         let attrs = &field.attrs;
-
-        let is_phantom_data_field = ty_eq(ty, "PhantomData");
 
         let mut field_attrs = Vec::<FieldAttr>::new();
 
@@ -248,9 +348,7 @@ impl<'a> FieldInfo<'a> {
        Ok(Self {
         name,
         ty,
-        vis,
-        attrs: field_attrs,
-        is_phantom_data_field
+        attrs: field_attrs
        })
     }
 
@@ -298,38 +396,61 @@ impl<'a> Iterator for FieldIter<'a> {
 }
 
 
-fn get_inner_type(ty: &Type) -> Option<&Type> {
+fn get_inner_types(ty: &Type) -> Option<Vec<&Type>> {
+    let mut inner_types: Vec<&Type> = Vec::default();
     match ty {
         Type::Path(path) => {
-            let path_se = path.path.segments.first();
-            if path_se.is_none() {
+            let path = &path.path;
+            let segments = &path.segments;
+            if segments.is_empty() {
                 return None;
             }
-            let path_se = path_se.unwrap();
-            match path_se.arguments {
-                PathArguments::AngleBracketed(ref args) => {
-                    let first_arg = args.args.first();
-                    if first_arg.is_none() {
-                        return None;
-                    }
-
-                    let first_arg = first_arg.unwrap();
-                    match first_arg {
-                        GenericArgument::Type(arg_type) => {
-                            return Some(arg_type);
-                        },
-                        _ => {
-                            return None;
-                        }
-                    }
-                },
-                _ => {
-                    return None;
+            
+            for segment in segments {
+                let arguments = &segment.arguments;
+                if arguments.is_none() {
+                    continue;
                 }
+                match arguments {
+                    syn::PathArguments::AngleBracketed(gen_args) => {
+                        let gen_args = &gen_args.args;
+                        for gen_arg in gen_args {
+                            match gen_arg {
+                                syn::GenericArgument::Type(gen_type) => {
+                                    inner_types.push(gen_type);
+                                },
+                                _ => {}
+                            }
+                        }
+                    },
+                    _ => {}
+                }
+               
             }
+            return Some(inner_types);
 
         },
         _ => return None
     }
 }
 
+fn is_associated_type(type_param: &Vec<String>, ty: &Type) -> (bool, String) {
+    
+    match ty {
+        Type::Path(path) => {
+            let path = &path.path;
+            let segments = &path.segments;
+            if segments.is_empty() {
+                return (false, "NONE".to_owned());
+            }
+            let first_segment = segments.first();
+            if first_segment.is_none() {
+                return (false, "NONE".to_owned());
+            }
+            let first_segment = first_segment.unwrap();
+            let ident_str = first_segment.ident.to_string();
+            return (type_param.contains(&ident_str), ident_str);
+        },
+        _ => return (false, "NONE".to_owned())
+    }
+}

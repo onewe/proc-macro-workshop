@@ -22,9 +22,8 @@ pub fn impl_debug(input: &DeriveInput) -> Result<TokenStream2, syn::Error> {
 
     let exp_lets = gen_debug_field_exp(&field_stream)?;
 
-    let phantom_data_fields = find_phantom_data_field_inner_type(&field_stream)?;
     let params: Vec<&syn::TypeParam> = generics.type_params().collect();
-    let gen_where_clause = gen_where_clause(params, phantom_data_fields);
+    let gen_where_clause = gen_where_clause(params, &field_stream)?;
     let (_, ty_generics, _) = generics.split_for_impl();
     
     let token = quote! {
@@ -40,71 +39,115 @@ pub fn impl_debug(input: &DeriveInput) -> Result<TokenStream2, syn::Error> {
    Ok(token)
 }
 
-fn gen_where_clause(type_params: Vec<&syn::TypeParam>, phantom_data_fields: Vec<&Ident>) -> syn::WhereClause {
+fn gen_where_clause(type_params: Vec<&syn::TypeParam>, field_stream: &FieldStream) -> Result<syn::WhereClause, syn::Error>  {
 
     let mut where_clause: syn::WhereClause = parse_quote! {
         where
     };
 
+    let type_param: Vec<String> =  type_params.iter().map(|t|t.ident.to_string()).collect();
 
-    for ty_param in type_params {
-        let type_name = &ty_param.ident;
-        let matched = phantom_data_fields.iter().any(|inner_ty|inner_ty.to_string().eq(type_name.to_string().as_str()));
-        if matched {
-         
-            let where_predicate: syn::WherePredicate = parse_quote! {
-                std::marker::PhantomData<#type_name>: std::fmt::Debug
-            };
-          
-            where_clause.predicates.push(where_predicate);
-        } else {
-            let where_predicate: syn::WherePredicate = parse_quote! {
-                #type_name: std::fmt::Debug
-            };
-          
-            where_clause.predicates.push(where_predicate);
-        }
+    let where_predicates = gen_where_predicate(type_param, field_stream)?;
 
-       
+    for where_predicate in where_predicates {
+        where_clause.predicates.push(where_predicate);
     }
 
 
-    where_clause
+    Ok(where_clause)
 }
 
-fn find_phantom_data_field_inner_type<'a>(field_stream: &'a FieldStream) -> Result<Vec<&'a Ident>, syn::Error> {
-    let mut fields: Vec<&Ident> = Vec::default();
 
+fn gen_where_predicate(type_param: Vec<String>, field_stream: &FieldStream) -> Result<Vec<syn::WherePredicate>, syn::Error> {
+    
+    let mut type_vec: Vec<String> = Vec::default();
+    let mut vec: Vec<syn::WherePredicate> = Vec::default();
     for field in field_stream.iter() {
         let field = field?;
-        if !field.is_phantom_data_field {
-            continue;
-        }
         let ty = field.ty;
-        let inner_type = get_inner_type(ty);
-        if inner_type.is_none() {
+
+        let where_predicate = find_generics_type(&type_param, ty);
+        if where_predicate.is_none() {
             continue;
         }
-
-        let inner_type = inner_type.unwrap();
-        match inner_type {
-            syn::Type::Path(path_type) => {
-                let p = &path_type.path;
-                let ident = p.get_ident();
-                if ident.is_none() {
-                    continue;
-                }
-                let ident = ident.unwrap();
-                fields.push(ident);
-            },
-            _ => {
-                continue;
-            }
+        
+        let (where_predicate, type_string) = where_predicate.unwrap();
+       
+        if !type_vec.contains(&type_string) {
+            vec.push(where_predicate);
+            type_vec.push(type_string);
         }
 
     }
 
-    Ok(fields)
+    Ok(vec)
+}
+
+fn find_generics_type(type_param: &Vec<String>, ty: &Type) -> Option<(syn::WherePredicate, String)> {
+    match ty {
+        syn::Type::Path(path) => {
+            let path = &path.path;
+            let ident = path.get_ident();
+            
+            if ident.is_none() {
+                let inner_type = get_inner_type(ty);
+                if inner_type.is_none() {
+                    return None;
+                }
+                let inner_type = inner_type.unwrap();
+ 
+                let ph_data_field = ty_eq(ty, "PhantomData");
+                if  ph_data_field {
+                    let inner_type_str = type_to_ident_str(inner_type);
+                    if  inner_type_str.is_none(){
+                        return None;
+                    }
+                    let inner_type_str = inner_type_str.unwrap();
+                    let contain = type_param.contains(&inner_type_str);
+                    if contain {
+                        let where_predicate: syn::WherePredicate = parse_quote! {
+                            std::marker::PhantomData<#inner_type>: std::fmt::Debug
+                        };
+                        return Some((where_predicate, inner_type_str));
+                    } else {
+                        return None;
+                    }
+                }
+                return find_generics_type(type_param, inner_type);
+            }
+           
+            let ident = ident.unwrap();
+            let ident_str = ident.to_string();
+            let contain = type_param.contains(&ident_str);
+            if contain {
+            
+                let where_predicate: syn::WherePredicate = parse_quote! {
+                    #ty: std::fmt::Debug
+                };
+                return Some((where_predicate, ident_str));
+            } else {
+               return None
+            }
+
+        },
+        _ => return None
+    }
+}
+
+fn type_to_ident_str(ty: &Type) -> Option<String> {
+    match ty {
+        syn::Type::Path(path) => {
+            let path = &path.path;
+            let ident = path.get_ident();
+            if ident.is_none() {
+                return None;
+            }
+            let ident = ident.unwrap();
+            let ident_str = ident.to_string();
+            return Some(ident_str);
+        },
+        _ => None
+    }
 }
 
 fn gen_debug_field_exp(field_stream: &FieldStream) -> Result<Vec<syn::ExprLet>, syn::Error> {
@@ -256,7 +299,6 @@ impl<'a> Iterator for FieldIter<'a> {
 
 
 fn get_inner_type(ty: &Type) -> Option<&Type> {
-
     match ty {
         Type::Path(path) => {
             let path_se = path.path.segments.first();

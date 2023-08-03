@@ -17,3 +17,5 @@ trybuild = { version = "1.0.49", features = ["diff"] }
 
 [dependencies]
 # TODO
+syn = {version = "2.0.27", features = ["default", "extra-traits", "full"]}
+proc-macro2 = "1.0.66"

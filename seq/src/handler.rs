@@ -77,11 +77,14 @@ fn eval_token_tree(var: &Ident, value: u16, token_tree: proc_macro2::TokenTree) 
         proc_macro2::TokenTree::Group(ref group) => {
             let delimiter = group.delimiter();
             let token_stream = group.stream();
+            let span = group.span();
             
             let mapped_token_tree: Vec<_> = token_stream.into_iter().map(|tt|eval_token_tree(var, value, tt)).collect();
 
             let token_stream = TokenStream::from_iter(mapped_token_tree.into_iter());
-            proc_macro2::TokenTree::Group(proc_macro2::Group::new(delimiter, token_stream))
+            let mut new_group = proc_macro2::Group::new(delimiter, token_stream);
+            new_group.set_span(span);
+            proc_macro2::TokenTree::Group(new_group)
         },
         _ => token_tree
     }

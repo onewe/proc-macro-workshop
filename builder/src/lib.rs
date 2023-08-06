@@ -1,6 +1,6 @@
 use handler::FieldStream;
 use proc_macro::TokenStream;
-use syn::{parse_macro_input, DeriveInput, __private::{quote::{format_ident, quote}}, Data};
+use syn::{parse_macro_input, DeriveInput, __private::quote::{format_ident, quote}, Data};
 
 mod handler;
 

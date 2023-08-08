@@ -1,5 +1,3 @@
-use std::process::id;
-
 use proc_macro2::{TokenStream, Span};
 use quote::format_ident;
 use syn::{parse::{Parse, Parser}, Token};
@@ -32,12 +30,13 @@ impl BitField {
     pub fn to_token_stream(self) -> syn::Result<TokenStream> {
         let name  = self.name;
         let visi = self.visi;
-        let fields = self.fields;
+        let fields = &self.fields;
         let attrs = self.attrs;
-        let generics = self.generics;
-
+        let generics = &self.generics;
+        let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
        
         let const_size_expr = gen_const_size_expr(fields)?;
+        let getter_fn_methods = gen_get_fn(fields)?;
         
         
        let token_stream =  quote::quote! {
@@ -47,6 +46,11 @@ impl BitField {
             #visi struct #name #generics {
                 data: [u8;MAX_LEN]
             }
+
+            impl #impl_generics #name #ty_generics #where_clause {
+                #getter_fn_methods
+            }
+            
         };
 
 
@@ -54,14 +58,14 @@ impl BitField {
     }
 }
 
-fn gen_const_size_expr(fields: syn::Fields) -> syn::Result<TokenStream> {
+fn gen_const_size_expr(fields: &syn::Fields) -> syn::Result<TokenStream> {
     let mut token_streams: Vec<TokenStream> = Vec::default();
 
     let fields_len = fields.len();
     let fields_iter = fields.into_iter();
 
     for (idx, field) in fields_iter.enumerate() {
-        let ty = field.ty;
+        let ty = &field.ty;
         if idx == fields_len -1 {
             // the last
             let last_expr =  quote::quote! {
@@ -91,7 +95,205 @@ fn gen_const_size_expr(fields: syn::Fields) -> syn::Result<TokenStream> {
 }
 
 
+fn gen_get_fn(fields: &syn::Fields) -> syn::Result<TokenStream> {
+    let mut getter_fn_methods: Vec<TokenStream> = Vec::default();
+    let mut current_field_lens = TokenStream::default();
 
+    let mut previous_field_type: Option<&syn::Type> = None;
+
+    for field in fields.iter() {
+        let field_name = field.ident.as_ref();
+        if field_name.is_none() {
+            continue;
+        }
+        let field_name = field_name.unwrap();
+        let field_name = format_ident!("get_{}", field_name);
+
+        let current_field_ty = &field.ty;
+
+        let const_start_index_expr =  if previous_field_type.is_none() {
+            previous_field_type = Some(current_field_ty);
+    
+            quote::quote! {
+                const BIT_START_INDEX: usize = 0;
+            }
+        } else {
+
+            let unwrap_previous_field_type = previous_field_type.unwrap();
+            previous_field_type = Some(current_field_ty);
+
+            let current_field_len = if current_field_lens.is_empty() {
+                quote::quote! {
+                     <#unwrap_previous_field_type as bitfield::Specifier>::BITS
+                }
+            } else {
+                quote::quote! {
+                    +  <#unwrap_previous_field_type as bitfield::Specifier>::BITS
+                }
+            };
+
+            current_field_lens.extend(current_field_len);
+
+            quote::quote! {
+                const BIT_START_INDEX: usize = #current_field_lens;
+            }
+        };
+
+        let getter_method = quote::quote! {
+            pub fn #field_name(&self) -> <#current_field_ty as bitfield::Specifier>::Type {
+                #const_start_index_expr
+                const BITS: usize = <#current_field_ty as bitfield::Specifier>::BITS;
+               
+                let mut start_index = BIT_START_INDEX;
+                let mut remain_bits = BITS;
+
+                let mut ret_number = <#current_field_ty as bitfield::Specifier>::Type::MIN;
+
+                while remain_bits > 0 {
+                    let byte_mul = start_index / 8;
+                    let byte_mod = start_index % 8;
+            
+                    let element = self.data[byte_mul];
+            
+                    let element = if byte_mod == 0 {
+                        if remain_bits >= 8 {
+                            remain_bits -= 8;
+                            start_index += 8;
+                            element
+                        } else {
+                            let element = element >> (8 - remain_bits);
+                            remain_bits -= remain_bits;
+                            start_index += remain_bits;
+                            element
+                        }
+                       
+                    } else {
+                        let element = (element << byte_mod) >> byte_mod;
+                        remain_bits -= 8 - byte_mod;
+                        start_index += 8 - byte_mod;
+                        element
+                    };
+
+                    let offset = 8 - element.leading_ones();
+
+                    ret_number = ret_number << offset;
+
+                    ret_number = ret_number | element as <#current_field_ty as bitfield::Specifier>::Type;
+
+                }
+            
+                ret_number
+            }
+        };
+
+        getter_fn_methods.push(getter_method);
+
+
+    }
+
+    Ok(TokenStream::from_iter(getter_fn_methods.into_iter()))
+}
+
+
+fn gen_set_fn(fields: &syn::Fields) -> syn::Result<TokenStream> {
+
+    let mut setter_fn_methods: Vec<TokenStream> = Vec::default();
+    let mut current_field_lens = TokenStream::default();
+
+    let mut previous_field_type: Option<&syn::Type> = None;
+
+    for field in fields.iter() { 
+        let field_name = field.ident.as_ref();
+        if field_name.is_none() {
+            continue;
+        }
+        let field_name = field_name.unwrap();
+        let field_name = format_ident!("set_{}", field_name);
+
+        let current_field_ty = &field.ty;
+
+        let const_start_index_expr =  if previous_field_type.is_none() {
+            previous_field_type = Some(current_field_ty);
+    
+            quote::quote! {
+                const BIT_START_INDEX: usize = 0;
+            }
+        } else {
+
+            let unwrap_previous_field_type = previous_field_type.unwrap();
+            previous_field_type = Some(current_field_ty);
+
+            let current_field_len = if current_field_lens.is_empty() {
+                quote::quote! {
+                     <#unwrap_previous_field_type as bitfield::Specifier>::BITS
+                }
+            } else {
+                quote::quote! {
+                    +  <#unwrap_previous_field_type as bitfield::Specifier>::BITS
+                }
+            };
+
+            current_field_lens.extend(current_field_len);
+
+            quote::quote! {
+                const BIT_START_INDEX: usize = #current_field_lens;
+            }
+        };
+
+
+
+
+    }
+
+    todo!()
+}
+
+
+fn set_fn_template(target_num: u16) {
+    const BIT_START_INDEX: usize = 9;
+
+    let mut start_index = BIT_START_INDEX;
+    let mut remain_bits = 12usize;
+
+    let mut target_num = target_num << target_num.leading_ones();
+
+    let mut data = [0u8; 4];
+
+    while remain_bits > 0 {
+
+        let byte_mul = start_index / 8;
+        let byte_mod = start_index % 8;
+
+        let element = &mut data[byte_mul];
+
+        if byte_mod == 0 {
+            let target_data = (target_num >> 8) as u8;
+            *element = *element | target_data;
+            start_index += remain_bits;
+
+            remain_bits -= remain_bits;
+
+            target_num = target_num << remain_bits;
+
+        } else {
+            
+            let require_bits = 8 - byte_mod;
+
+            let target_data = (target_num >> (16 - require_bits)) as u8;
+
+            *element = *element | target_data;
+
+            start_index += require_bits;
+
+            remain_bits -= require_bits;
+
+            target_num = target_num << require_bits;
+        }
+
+    }
+
+
+}
 
 pub struct BTypeGenerator {
     start: usize,
@@ -122,9 +324,7 @@ impl BTypeGenerator {
             let data_type = gen_data_type(idx)?;
             let bits = proc_macro2::Literal::usize_unsuffixed(idx);
             let token_stream = quote::quote! {
-                pub struct #ident {
-
-                }
+                pub struct #ident;
 
                 impl Specifier for #ident {
                     const BITS: usize = #bits;

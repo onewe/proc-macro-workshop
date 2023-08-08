@@ -37,6 +37,8 @@ impl BitField {
        
         let const_size_expr = gen_const_size_expr(fields)?;
         let getter_fn_methods = gen_get_fn(fields)?;
+        let setter_fn_methods = gen_set_fn(fields)?;
+        let new_fn_method = gen_new_fn()?;
         
         
        let token_stream =  quote::quote! {
@@ -48,7 +50,9 @@ impl BitField {
             }
 
             impl #impl_generics #name #ty_generics #where_clause {
+                #new_fn_method
                 #getter_fn_methods
+                #setter_fn_methods
             }
             
         };
@@ -168,13 +172,21 @@ fn gen_get_fn(fields: &syn::Fields) -> syn::Result<TokenStream> {
                         }
                        
                     } else {
-                        let element = (element << byte_mod) >> byte_mod;
-                        remain_bits -= 8 - byte_mod;
-                        start_index += 8 - byte_mod;
+                        let mut element = (element << byte_mod) >> byte_mod;
+
+                        if remain_bits <= (8 - byte_mod) {
+                            element = element >> (8 - remain_bits - byte_mod);
+                            remain_bits -= remain_bits;
+                            start_index += remain_bits;
+                        } else {
+                            remain_bits -= 8 - byte_mod;
+                            start_index += 8 - byte_mod;
+                        }
+                        
                         element
                     };
 
-                    let offset = 8 - element.leading_ones();
+                    let offset = 8 - element.leading_zeros();
 
                     ret_number = ret_number << offset;
 
@@ -240,61 +252,93 @@ fn gen_set_fn(fields: &syn::Fields) -> syn::Result<TokenStream> {
             }
         };
 
+        let setter_method = quote::quote! {
+            pub fn #field_name(&mut self, mut arg: <#current_field_ty as bitfield::Specifier>::Type){
+                #const_start_index_expr
+                const BITS: usize = <#current_field_ty as bitfield::Specifier>::BITS;
+               
+                let mut start_index = BIT_START_INDEX;
+                let mut remain_bits = BITS;
 
 
+                while remain_bits > 0 {
+                    let byte_mul = start_index / 8;
+                    let byte_mod = start_index % 8;
+            
+                    let element = &mut self.data[byte_mul];
+            
+                    if byte_mod == 0 {
+                        let require_bits = if remain_bits >= 8 {
+                            8
+                        } else {
+                            remain_bits
+                        };
+                        let offset = remain_bits - require_bits;
+                        *element = (*element) | (((arg >> offset) as u8) << (8 - require_bits));
 
+                        let mask = !(<#current_field_ty as bitfield::Specifier>::Type::MAX << offset);
+                        arg = arg & mask;
+                        
+                        start_index += require_bits;
+                        remain_bits -= require_bits;
+                    } else {
+
+                        if remain_bits <= (8 - byte_mod) {
+                            let offset = 8 - byte_mod - remain_bits;
+                            *element = (*element) | (arg << offset) as u8;
+                            start_index += remain_bits;
+                            remain_bits -= remain_bits;
+                        } else {
+                            let require_bits = 8 - byte_mod;
+                            let offset = remain_bits - require_bits;
+                            *element = (*element) | (arg >> offset) as u8;
+
+                            let mask = !(<#current_field_ty as bitfield::Specifier>::Type::MAX << offset);
+                            arg = arg & mask;
+
+                            start_index += require_bits;
+                            remain_bits -= require_bits;
+                        }
+
+                    }
+
+                }
+            }
+        };
+        setter_fn_methods.push(setter_method);
     }
+
+    Ok(TokenStream::from_iter(setter_fn_methods.into_iter()))
+}
+
+fn gen_new_fn() -> syn::Result<TokenStream> {
+    let token_stream = quote::quote! {
+
+        pub fn new() -> Self {
+            Self {
+                data: [0u8; MAX_LEN]
+            }
+        }
+    };
+
+    Ok(token_stream)
+}
+
+
+fn gen_assert_const_expr() -> syn::Result<TokenStream> {
+
+    let token_stream = TokenStream::default();
+
+    let assert_multiple_of_8bits_fn = quote::quote! {
+        const fn _assert_multiple_of_8bits_fn() {
+            
+        }
+    };
+
 
     todo!()
-}
-
-
-fn set_fn_template(target_num: u16) {
-    const BIT_START_INDEX: usize = 9;
-
-    let mut start_index = BIT_START_INDEX;
-    let mut remain_bits = 12usize;
-
-    let mut target_num = target_num << target_num.leading_ones();
-
-    let mut data = [0u8; 4];
-
-    while remain_bits > 0 {
-
-        let byte_mul = start_index / 8;
-        let byte_mod = start_index % 8;
-
-        let element = &mut data[byte_mul];
-
-        if byte_mod == 0 {
-            let target_data = (target_num >> 8) as u8;
-            *element = *element | target_data;
-            start_index += remain_bits;
-
-            remain_bits -= remain_bits;
-
-            target_num = target_num << remain_bits;
-
-        } else {
-            
-            let require_bits = 8 - byte_mod;
-
-            let target_data = (target_num >> (16 - require_bits)) as u8;
-
-            *element = *element | target_data;
-
-            start_index += require_bits;
-
-            remain_bits -= require_bits;
-
-            target_num = target_num << require_bits;
-        }
-
-    }
-
 
 }
-
 pub struct BTypeGenerator {
     start: usize,
     end: usize

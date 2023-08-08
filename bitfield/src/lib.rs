@@ -13,6 +13,7 @@
 pub use bitfield_impl::bitfield;
 use bitfield_impl::gen_bit_type;
 
+
 // TODO other things
 
 pub trait Specifier {
@@ -20,13 +21,35 @@ pub trait Specifier {
     type Type;
 }
 
+// bitfield::checks::SevenMod8: bitfield::checks::TotalSizeIsMultipleOfEightBits
+pub mod checks {
+
+    pub trait TotalSizeIsMultipleOfEightBits {
+        fn test_print2() {
+            println!("ok..... TotalSizeIsMultipleOfEightBits");
+        }
+    }
+
+    pub trait SevenMod8: TotalSizeIsMultipleOfEightBits{
+        fn test_print1() {
+            println!("ok..... SevenMod8");
+        }
+    }
+
+}
+
+
 gen_bit_type![1..128];
 
 
-// #[bitfield]
-// pub struct MyFourBytes {
-//     a: B1,
-//     b: B3,
-//     c: B4,
-//     d: B24,
-// }
+const fn _assert_multiple_of_8bits_fn() {
+    use crate::checks::TotalSizeIsMultipleOfEightBits;
+    if 1 == 6 {
+        impl TotalSizeIsMultipleOfEightBits for B8 {}
+    } 
+
+    
+
+}
+use crate::checks::SevenMod8;
+impl SevenMod8 for B8 {}

@@ -2,7 +2,6 @@ use proc_macro2::{TokenStream, Span};
 use quote::format_ident;
 use syn::{parse::{Parse, Parser}, Token};
 
-
 pub struct BitField {
     visi: syn::Visibility,
     name: syn::Ident,
@@ -54,6 +53,11 @@ impl BitField {
                 #getter_fn_methods
                 #setter_fn_methods
             }
+
+            const _:() = {
+                struct _AssertMod8 where <bitfield::checks::BitSizeMod<{TOTAL_SIZE % 8}> as bitfield::checks::AssertMod8>::CheckType: bitfield::checks::TotalSizeIsMultipleOfEightBits;
+            };
+           
             
         };
 
@@ -86,11 +90,13 @@ fn gen_const_size_expr(fields: &syn::Fields) -> syn::Result<TokenStream> {
 
    let token_stream =  if token_streams.is_empty() {
         quote::quote! {
+            const TOTAL_SIZE: usize = 0;
             const MAX_LEN: usize = 0;
         }
     } else {
         let calc_expr = TokenStream::from_iter(token_streams.into_iter());
         quote::quote! {
+            const TOTAL_SIZE: usize = #calc_expr;
             const MAX_LEN: usize = (#calc_expr) / 8;
         }
     };

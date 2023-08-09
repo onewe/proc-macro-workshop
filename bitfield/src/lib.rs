@@ -12,19 +12,12 @@
 // (macro, trait, struct) through the one bitfield crate.
 pub use bitfield_impl::bitfield;
 use bitfield_impl::gen_bit_type;
-use checks::TotalSizeIsMultipleOfEightBits;
-
-use crate::checks::{SevenMod8, TwoMod8};
 
 // TODO other things
 
 pub trait Specifier {
     const BITS: usize;
     type Type;
-}
-
-pub trait StructBits {
-    const TOTAL_BITS: usize;
 }
 
 pub mod checks {
@@ -42,55 +35,44 @@ pub mod checks {
     pub struct SixMod8;
     pub struct SevenMod8;
 
-}
+    pub struct BitSizeMod<const MOD: usize>;
 
-
-gen_bit_type![1..128];
-
-
-
-
-// #[macro_export]
-// macro_rules! check_mod8 {
-//     ($mod:expr) => {
-//         match $mod {
-//             0 => {
-//                 struct _AssertMod8 where bitfield::checks::ZeroMod8: TotalSizeIsMultipleOfEightBits;
-//             },
-//             1 => {
-//                 struct _AssertMod8 where bitfield::checks::OneMod8: TotalSizeIsMultipleOfEightBits;
-//             },
-//             2 => {
-//                 struct _AssertMod8 where bitfield::checks::TwoMod8: TotalSizeIsMultipleOfEightBits;
-//             },
-//             3 => {
-//                 struct _AssertMod8 where bitfield::checks::ThreeMod8: TotalSizeIsMultipleOfEightBits;
-//             },
-//             4 => {
-//                 struct _AssertMod8 where bitfield::checks::FourMod8: TotalSizeIsMultipleOfEightBits;
-//             },
-//             5 => {
-//                 struct _AssertMod8 where bitfield::checks::FiveMod8: TotalSizeIsMultipleOfEightBits;
-//             },
-//             6 => {
-//                 struct _AssertMod8 where bitfield::checks::SixMod8: TotalSizeIsMultipleOfEightBits;
-//             },
-//             7 => {
-//                 struct _AssertMod8 where bitfield::checks::SevenMod8: TotalSizeIsMultipleOfEightBits;
-//             }
-//         }
-//     };
-// }
-
-
-const MAX_DD: usize = 10;
-
-const _: () = {
-
-    if MAX_DD > 20 {
-        impl TotalSizeIsMultipleOfEightBits for  SevenMod8{}
-    } else {
-        impl TotalSizeIsMultipleOfEightBits for  TwoMod8{}
+    pub trait AssertMod8 {
+        type CheckType;
     }
 
-};
+    impl AssertMod8 for BitSizeMod<0> {
+        type CheckType = ZeroMod8;
+    }
+
+    impl AssertMod8 for BitSizeMod<1> {
+        type CheckType = OneMod8;
+    }
+
+    impl AssertMod8 for BitSizeMod<2> {
+        type CheckType = TwoMod8;
+    }
+
+    impl AssertMod8 for BitSizeMod<3> {
+        type CheckType = ThreeMod8;
+    }
+
+    impl AssertMod8 for BitSizeMod<4> {
+        type CheckType = FourMod8;
+    }
+
+    impl AssertMod8 for BitSizeMod<5> {
+        type CheckType = FiveMod8;
+    }
+
+    impl AssertMod8 for BitSizeMod<6> {
+        type CheckType = SixMod8;
+    }
+
+    impl AssertMod8 for BitSizeMod<7> {
+        type CheckType = SevenMod8;
+    }
+
+}
+
+gen_bit_type![1..128];

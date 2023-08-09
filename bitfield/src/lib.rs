@@ -12,7 +12,9 @@
 // (macro, trait, struct) through the one bitfield crate.
 pub use bitfield_impl::bitfield;
 use bitfield_impl::gen_bit_type;
+use checks::TotalSizeIsMultipleOfEightBits;
 
+use crate::checks::{SevenMod8, TwoMod8};
 
 // TODO other things
 
@@ -21,20 +23,24 @@ pub trait Specifier {
     type Type;
 }
 
-// bitfield::checks::SevenMod8: bitfield::checks::TotalSizeIsMultipleOfEightBits
+pub trait StructBits {
+    const TOTAL_BITS: usize;
+}
+
 pub mod checks {
+    pub trait TotalSizeIsMultipleOfEightBits{}
 
-    pub trait TotalSizeIsMultipleOfEightBits {
-        fn test_print2() {
-            println!("ok..... TotalSizeIsMultipleOfEightBits");
-        }
-    }
+    impl TotalSizeIsMultipleOfEightBits for ZeroMod8{}
 
-    pub trait SevenMod8: TotalSizeIsMultipleOfEightBits{
-        fn test_print1() {
-            println!("ok..... SevenMod8");
-        }
-    }
+    pub struct ZeroMod8;
+
+    pub struct  OneMod8;
+    pub struct TwoMod8;
+    pub struct ThreeMod8;
+    pub struct FourMod8;
+    pub struct FiveMod8;
+    pub struct SixMod8;
+    pub struct SevenMod8;
 
 }
 
@@ -42,14 +48,49 @@ pub mod checks {
 gen_bit_type![1..128];
 
 
-const fn _assert_multiple_of_8bits_fn() {
-    use crate::checks::TotalSizeIsMultipleOfEightBits;
-    if 1 == 6 {
-        impl TotalSizeIsMultipleOfEightBits for B8 {}
-    } 
 
-    
 
-}
-use crate::checks::SevenMod8;
-impl SevenMod8 for B8 {}
+// #[macro_export]
+// macro_rules! check_mod8 {
+//     ($mod:expr) => {
+//         match $mod {
+//             0 => {
+//                 struct _AssertMod8 where bitfield::checks::ZeroMod8: TotalSizeIsMultipleOfEightBits;
+//             },
+//             1 => {
+//                 struct _AssertMod8 where bitfield::checks::OneMod8: TotalSizeIsMultipleOfEightBits;
+//             },
+//             2 => {
+//                 struct _AssertMod8 where bitfield::checks::TwoMod8: TotalSizeIsMultipleOfEightBits;
+//             },
+//             3 => {
+//                 struct _AssertMod8 where bitfield::checks::ThreeMod8: TotalSizeIsMultipleOfEightBits;
+//             },
+//             4 => {
+//                 struct _AssertMod8 where bitfield::checks::FourMod8: TotalSizeIsMultipleOfEightBits;
+//             },
+//             5 => {
+//                 struct _AssertMod8 where bitfield::checks::FiveMod8: TotalSizeIsMultipleOfEightBits;
+//             },
+//             6 => {
+//                 struct _AssertMod8 where bitfield::checks::SixMod8: TotalSizeIsMultipleOfEightBits;
+//             },
+//             7 => {
+//                 struct _AssertMod8 where bitfield::checks::SevenMod8: TotalSizeIsMultipleOfEightBits;
+//             }
+//         }
+//     };
+// }
+
+
+const MAX_DD: usize = 10;
+
+const _: () = {
+
+    if MAX_DD > 20 {
+        impl TotalSizeIsMultipleOfEightBits for  SevenMod8{}
+    } else {
+        impl TotalSizeIsMultipleOfEightBits for  TwoMod8{}
+    }
+
+};

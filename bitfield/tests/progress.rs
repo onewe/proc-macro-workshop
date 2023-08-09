@@ -1,13 +1,17 @@
-use bitfield::{B8, checks::{SevenMod8, TotalSizeIsMultipleOfEightBits}};
+use bitfield::{B8, B1};
+use bitfield::checks::TotalSizeIsMultipleOfEightBits;
+
+
+const MAX_LEN: u8  = 1;
+
+const MAX_LEN_MOD: u8 = 1 % 8;
 
 
 #[test]
 fn tests() {
+    let t = trybuild::TestCases::new();
 
-    let a = B8;
-    <B8 as TotalSizeIsMultipleOfEightBits>::test_print2();
-
-    // let t = trybuild::TestCases::new();
+    let a: Box<dyn bitfield::checks::TotalSizeIsMultipleOfEightBits> = Box::new(bitfield::checks::ThreeMod8);
     // t.pass("tests/01-specifier-types.rs");
     // t.pass("tests/02-storage.rs");
     // t.pass("tests/03-accessors.rs");
@@ -21,3 +25,6 @@ fn tests() {
     //t.compile_fail("tests/11-bits-attribute-wrong.rs");
     //t.pass("tests/12-accessors-edge.rs");
 }
+
+
+

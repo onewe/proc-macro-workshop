@@ -324,21 +324,6 @@ fn gen_new_fn() -> syn::Result<TokenStream> {
     Ok(token_stream)
 }
 
-
-fn gen_assert_const_expr() -> syn::Result<TokenStream> {
-
-    let token_stream = TokenStream::default();
-
-    let assert_multiple_of_8bits_fn = quote::quote! {
-        const fn _assert_multiple_of_8bits_fn() {
-            
-        }
-    };
-
-
-    todo!()
-
-}
 pub struct BTypeGenerator {
     start: usize,
     end: usize

@@ -18,6 +18,10 @@ use bitfield_impl::gen_bit_type;
 pub trait Specifier {
     const BITS: usize;
     type Type;
+
+    fn get_data(bits: &[u8], start_index: usize, remain_bits: usize) -> Self::Type;
+
+    fn set_data(bits: &mut[u8], start_index: usize, remain_bits: usize, arg: Self::Type);
 }
 
 pub mod checks {

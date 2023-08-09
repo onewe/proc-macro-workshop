@@ -157,50 +157,7 @@ fn gen_get_fn(fields: &syn::Fields) -> syn::Result<TokenStream> {
                 let mut start_index = BIT_START_INDEX;
                 let mut remain_bits = BITS;
 
-                let mut ret_number = <#current_field_ty as bitfield::Specifier>::Type::MIN;
-
-                while remain_bits > 0 {
-                    let byte_mul = start_index / 8;
-                    let byte_mod = start_index % 8;
-            
-                    let element = self.data[byte_mul];
-            
-                    let element = if byte_mod == 0 {
-                        if remain_bits >= 8 {
-                            remain_bits -= 8;
-                            start_index += 8;
-                            element
-                        } else {
-                            let element = element >> (8 - remain_bits);
-                            remain_bits -= remain_bits;
-                            start_index += remain_bits;
-                            element
-                        }
-                       
-                    } else {
-                        let mut element = (element << byte_mod) >> byte_mod;
-
-                        if remain_bits <= (8 - byte_mod) {
-                            element = element >> (8 - remain_bits - byte_mod);
-                            remain_bits -= remain_bits;
-                            start_index += remain_bits;
-                        } else {
-                            remain_bits -= 8 - byte_mod;
-                            start_index += 8 - byte_mod;
-                        }
-                        
-                        element
-                    };
-
-                    let offset = 8 - element.leading_zeros();
-
-                    ret_number = ret_number << offset;
-
-                    ret_number = ret_number | element as <#current_field_ty as bitfield::Specifier>::Type;
-
-                }
-            
-                ret_number
+                <#current_field_ty as bitfield::Specifier>::get_data(&self.data, start_index, remain_bits)
             }
         };
 
@@ -266,49 +223,8 @@ fn gen_set_fn(fields: &syn::Fields) -> syn::Result<TokenStream> {
                 let mut start_index = BIT_START_INDEX;
                 let mut remain_bits = BITS;
 
-
-                while remain_bits > 0 {
-                    let byte_mul = start_index / 8;
-                    let byte_mod = start_index % 8;
-            
-                    let element = &mut self.data[byte_mul];
-            
-                    if byte_mod == 0 {
-                        let require_bits = if remain_bits >= 8 {
-                            8
-                        } else {
-                            remain_bits
-                        };
-                        let offset = remain_bits - require_bits;
-                        *element = (*element) | (((arg >> offset) as u8) << (8 - require_bits));
-
-                        let mask = !(<#current_field_ty as bitfield::Specifier>::Type::MAX << offset);
-                        arg = arg & mask;
-                        
-                        start_index += require_bits;
-                        remain_bits -= require_bits;
-                    } else {
-
-                        if remain_bits <= (8 - byte_mod) {
-                            let offset = 8 - byte_mod - remain_bits;
-                            *element = (*element) | (arg << offset) as u8;
-                            start_index += remain_bits;
-                            remain_bits -= remain_bits;
-                        } else {
-                            let require_bits = 8 - byte_mod;
-                            let offset = remain_bits - require_bits;
-                            *element = (*element) | (arg >> offset) as u8;
-
-                            let mask = !(<#current_field_ty as bitfield::Specifier>::Type::MAX << offset);
-                            arg = arg & mask;
-
-                            start_index += require_bits;
-                            remain_bits -= require_bits;
-                        }
-
-                    }
-
-                }
+                <#current_field_ty as bitfield::Specifier>::set_data(&mut self.data, start_index, remain_bits, arg)
+                
             }
         };
         setter_fn_methods.push(setter_method);
@@ -364,6 +280,99 @@ impl BTypeGenerator {
                 impl Specifier for #ident {
                     const BITS: usize = #bits;
                     type Type = #data_type;
+
+                    fn get_data(bits: &[u8], mut start_index: usize, mut remain_bits: usize) -> Self::Type {
+
+                        let mut ret_number = Self::Type::MIN;
+
+                        while remain_bits > 0 {
+                            let byte_mul = start_index / 8;
+                            let byte_mod = start_index % 8;
+                    
+                            let element = bits[byte_mul];
+                    
+                            let element = if byte_mod == 0 {
+                                if remain_bits >= 8 {
+                                    remain_bits -= 8;
+                                    start_index += 8;
+                                    element
+                                } else {
+                                    let element = element >> (8 - remain_bits);
+                                    remain_bits -= remain_bits;
+                                    start_index += remain_bits;
+                                    element
+                                }
+                               
+                            } else {
+                                let mut element = (element << byte_mod) >> byte_mod;
+        
+                                if remain_bits <= (8 - byte_mod) {
+                                    element = element >> (8 - remain_bits - byte_mod);
+                                    remain_bits -= remain_bits;
+                                    start_index += remain_bits;
+                                } else {
+                                    remain_bits -= 8 - byte_mod;
+                                    start_index += 8 - byte_mod;
+                                }
+                                
+                                element
+                            };
+        
+                            let offset = 8 - element.leading_zeros();
+        
+                            ret_number = ret_number << offset;
+        
+                            ret_number = ret_number | element as Self::Type;
+        
+                        }
+                    
+                        ret_number
+                    }
+                    
+                    fn set_data(bits: &mut[u8], mut start_index: usize, mut remain_bits: usize, mut arg: Self::Type) {
+                        while remain_bits > 0 {
+                            let byte_mul = start_index / 8;
+                            let byte_mod = start_index % 8;
+                    
+                            let element = &mut bits[byte_mul];
+                    
+                            if byte_mod == 0 {
+                                let require_bits = if remain_bits >= 8 {
+                                    8
+                                } else {
+                                    remain_bits
+                                };
+                                let offset = remain_bits - require_bits;
+                                *element = (*element) | (((arg >> offset) as u8) << (8 - require_bits));
+        
+                                let mask = !(Self::Type::MAX << offset);
+                                arg = arg & mask;
+                                
+                                start_index += require_bits;
+                                remain_bits -= require_bits;
+                            } else {
+        
+                                if remain_bits <= (8 - byte_mod) {
+                                    let offset = 8 - byte_mod - remain_bits;
+                                    *element = (*element) | (arg << offset) as u8;
+                                    start_index += remain_bits;
+                                    remain_bits -= remain_bits;
+                                } else {
+                                    let require_bits = 8 - byte_mod;
+                                    let offset = remain_bits - require_bits;
+                                    *element = (*element) | (arg >> offset) as u8;
+        
+                                    let mask = !(Self::Type::MAX << offset);
+                                    arg = arg & mask;
+        
+                                    start_index += require_bits;
+                                    remain_bits -= require_bits;
+                                }
+        
+                            }
+        
+                        }
+                    }
                 }
             };
 

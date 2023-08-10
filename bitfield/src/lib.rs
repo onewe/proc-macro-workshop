@@ -24,6 +24,22 @@ pub trait Specifier {
     fn set_data(bits: &mut[u8], start_index: usize, remain_bits: usize, arg: Self::Type);
 }
 
+pub trait BitfieldSpecifier{
+
+    type BType: BType;
+
+    fn raw_value(&self) -> <<Self::BType as BType>::Type as Specifier>::Type;
+
+    fn from_raw_value(value: <<Self::BType as BType>::Type as Specifier>::Type) -> Self;
+    
+}
+
+pub struct Bits<const BITS: usize>;
+
+pub trait BType {
+    type Type: Specifier;
+}
+
 pub mod checks {
     pub trait TotalSizeIsMultipleOfEightBits{}
 

@@ -1,4 +1,5 @@
 use bit_field::BitField;
+use bit_field_specifier::BitfieldSpecifierGen;
 use gen_bit_type::BTypeGenerator;
 use proc_macro::TokenStream;
 use syn::parse_macro_input;
@@ -19,7 +20,8 @@ pub fn bitfield(args: TokenStream, input: TokenStream) -> TokenStream {
 #[proc_macro_derive(BitfieldSpecifier)]
 pub fn bit_field_specifier(input: TokenStream) -> TokenStream {
 
-    todo!()
+    let bit_field_specifier = parse_macro_input!(input as BitfieldSpecifierGen);
+    bit_field_specifier.to_token_stream().unwrap_or_else(|e|e.into_compile_error()).into()
 }
 
 #[proc_macro]

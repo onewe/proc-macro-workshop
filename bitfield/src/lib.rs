@@ -11,7 +11,11 @@
 // From the perspective of a user of this crate, they get all the necessary APIs
 // (macro, trait, struct) through the one bitfield crate.
 pub use bitfield_impl::bitfield;
+pub use bitfield_impl::BitfieldSpecifier;
+
+
 use bitfield_impl::gen_bit_type;
+
 
 // TODO other things
 
@@ -22,6 +26,20 @@ pub trait Specifier {
     fn get_data(bits: &[u8], start_index: usize, remain_bits: usize) -> Self::Type;
 
     fn set_data(bits: &mut[u8], start_index: usize, remain_bits: usize, arg: Self::Type);
+}
+
+impl Specifier for bool {
+    const BITS: usize = 1;
+
+    type Type = u8;
+
+    fn get_data(bits: &[u8], start_index: usize, remain_bits: usize) -> Self::Type {
+        B8::get_data(bits, start_index, remain_bits)
+    }
+
+    fn set_data(bits: &mut[u8], start_index: usize, remain_bits: usize, arg: Self::Type) {
+        B8::set_data(bits, start_index, remain_bits, arg)
+    }
 }
 
 pub trait BitfieldSpecifier{

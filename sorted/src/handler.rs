@@ -92,7 +92,6 @@ impl VisitMut for CheckVisitMut {
                                 let ret = cmp_pat(a_pat, b_pat);
 
                                 if ret.is_none() {
-                                    eprintln!("a: {:?}, b: {:?}", a_pat, b_pat);
                                     self.0.push(syn::Error::new(b.span(), "unsupported by #[sorted]"));
                                     return Ordering::Equal;
                                 }

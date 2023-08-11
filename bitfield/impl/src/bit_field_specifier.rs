@@ -1,7 +1,5 @@
-use std::cmp::Ordering;
-
-use proc_macro2::TokenStream;
-use quote::spanned::Spanned;
+use proc_macro2::{TokenStream, Span};
+use quote::{spanned::Spanned, format_ident};
 use syn::parse::{Parse, Parser};
 
 pub struct BitfieldSpecifierGen {
@@ -43,11 +41,18 @@ impl BitfieldSpecifierGen {
         let variants = &self.variants;
         let generics = &self.generics;
 
+        let len = variants.len();
+
+        if !len.is_power_of_two() {
+            return Err(syn::Error::new(Span::call_site(), "BitfieldSpecifier expected a number of variants which is a power of 2"));
+        }
+
         let total_bits_const_expr = gen_total_bits_const_expr(variants)?;
 
         let impl_specifier_block = gen_impl_specifier_block(name, generics)?;
 
         let impl_bit_field_specifier_block = gen_impl_bit_field_specifier_block(name, generics, variants)?;
+        let assert_discriminant_in_range_block = gen_assert_discriminant_in_range_block(name, variants)?;
 
         Ok(quote::quote! {
             const _:() = {
@@ -56,20 +61,43 @@ impl BitfieldSpecifierGen {
                 #impl_specifier_block
 
                 #impl_bit_field_specifier_block
+
+                #assert_discriminant_in_range_block
             };
         })
     }
 }
 
-fn gen_total_bits_const_expr(variants: &syn::punctuated::Punctuated<syn::Variant, syn::token::Comma>) -> syn::Result<TokenStream> {
-    
-
+fn gen_total_bits_const_expr( variants: &syn::punctuated::Punctuated<syn::Variant, syn::token::Comma>) -> syn::Result<TokenStream> {
     let count = variants.iter().count() -1;
     let bits = (usize::BITS - count.leading_zeros()) as usize;
     let bits = proc_macro2::Literal::usize_unsuffixed(bits);
+
    Ok(quote::quote! {
         const ENUM_TOTAL_BITS: usize = #bits;
+        const POW_ENUM_TOTAL_BITS: usize = 2usize.pow(ENUM_TOTAL_BITS as u32);
    })
+}
+
+
+fn gen_assert_discriminant_in_range_block(name: &syn::Ident, variants: &syn::punctuated::Punctuated<syn::Variant, syn::token::Comma>) -> syn::Result<TokenStream> {
+    let mut token_streams = TokenStream::default();
+    for variant in variants {
+        let span = variant.__span();
+        let variant_name = &variant.ident;
+
+        let assert_ident = format_ident!("_AssertDiscriminantInRangeFor{}", variant_name);
+
+        let variant_path = syn::Path::parse.parse2(quote::quote!{
+            #name::#variant_name
+        })?;
+
+        let assert_token_stream = quote::quote_spanned! {span=>
+            struct #assert_ident where <bitfield::checks::AssertDiscriminantInRange<{(#variant_path as usize) < POW_ENUM_TOTAL_BITS}> as bitfield::checks::IFDiscriminantInRange>::Type: bitfield::checks::DiscriminantInRange;
+        };
+        token_streams.extend(assert_token_stream);
+    }
+    Ok(token_streams)
 }
 
 
@@ -113,79 +141,31 @@ fn gen_impl_specifier_block(name: &syn::Ident, generics: &syn::Generics) -> syn:
 fn gen_impl_bit_field_specifier_block(name: &syn::Ident, generics: &syn::Generics, variants: &syn::punctuated::Punctuated<syn::Variant, syn::token::Comma>,) -> syn::Result<TokenStream> {
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
     
-
-    let mut variants: Vec<_> =  variants.iter().enumerate().map(|(idx, variant)| {
+    let mut variant_names = Vec::default();
+    for variant in variants {
         let variant_name = &variant.ident;
         let variant_name = syn::Path::parse.parse2(quote::quote!{
             #name::#variant_name
-        }).unwrap();
+        })?;
+        variant_names.push(variant_name);
+    }
 
-        let discriminant = variant.discriminant.as_ref();
-        let order = if discriminant.is_none() {
-            None 
-        } else {
-            let (_, expr) = discriminant.unwrap();
-            let syn::Expr::Lit(lit_expr) = expr else {
-                return (idx, None, variant_name);
-            };
+   
 
-            let syn::Lit::Int(int_lit) = &lit_expr.lit else {
-                return (idx, None, variant_name);
-            };
-
-            let order = int_lit.base10_parse::<usize>();
-            if order.is_err() {
-                return (idx, None, variant_name);
-            }
-            let order = order.unwrap();
-            Some(order)
-        };
-
-        (idx, order, variant_name)
-    }).collect();
-
-    variants.sort_by(|(a_index, a_order, _),(b_index, b_order, _)| {
-        if a_order.is_some() && b_order.is_some() {
-            return a_order.unwrap().cmp(&b_order.unwrap())
-        }
-
-        if a_order.is_some() && b_order.is_none() {
-            let a_order = a_order.unwrap();
-            if a_order == *b_index {
-                return Ordering::Less;
-            }
-            return a_order.cmp(b_index);
-        }
-
-        if a_order.is_none() && b_order.is_some() {
-            let b_order = b_order.unwrap();
-            if b_order == *a_index {
-                return Ordering::Less;
-            }
-            return a_index.cmp(&b_order);
-        }
-
-        return a_index.cmp(b_index)
-    });
-
-    let variants: Vec<_> = variants.into_iter().map(|(_, _, ident)|ident).collect();
-
-    let mut raw_value_match_arms = TokenStream::default();
     let mut from_raw_value_match_arms = TokenStream::default();
+    let mut raw_value_match_arms = TokenStream::default();
 
-    for (idx, variant) in variants.into_iter().enumerate() {
-
-        let idx = proc_macro2::Literal::usize_unsuffixed(idx);
-        let raw_value_match_arm = quote::quote! {
-            #variant => #idx,
-        };
-        raw_value_match_arms.extend(raw_value_match_arm);
-
+    for variant_name in variant_names.iter() {
 
         let from_raw_value_match_arm = quote::quote! {
-            #idx => #variant,
+            value if value == (#variant_name as <<Self::BType as BType>::Type as Specifier>::Type) => #variant_name,
         };
         from_raw_value_match_arms.extend(from_raw_value_match_arm);
+
+        let raw_value_match_arm = quote::quote! {
+            #variant_name => (#variant_name as <<Self::BType as BType>::Type as Specifier>::Type),
+        };
+        raw_value_match_arms.extend(raw_value_match_arm);
     }
 
     Ok(quote::quote! {
@@ -207,5 +187,4 @@ fn gen_impl_bit_field_specifier_block(name: &syn::Ident, generics: &syn::Generic
             }
         }
     })
-
 }

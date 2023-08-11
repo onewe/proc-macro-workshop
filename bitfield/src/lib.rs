@@ -65,6 +65,30 @@ pub trait BType {
 }
 
 pub mod checks {
+
+    pub trait DiscriminantInRange {
+    }
+
+    pub struct True;
+
+    impl DiscriminantInRange for True {}
+
+    pub struct False;
+
+    pub struct AssertDiscriminantInRange<const CHECK: bool>;
+
+    pub trait IFDiscriminantInRange {
+        type Type;
+    }
+
+    impl IFDiscriminantInRange for AssertDiscriminantInRange<true> {
+        type Type = True;
+    }
+
+    impl IFDiscriminantInRange for AssertDiscriminantInRange<false> {
+        type Type = False;
+    } 
+
     pub trait TotalSizeIsMultipleOfEightBits{}
 
     impl TotalSizeIsMultipleOfEightBits for ZeroMod8{}

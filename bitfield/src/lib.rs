@@ -31,14 +31,20 @@ pub trait Specifier {
 impl Specifier for bool {
     const BITS: usize = 1;
 
-    type Type = u8;
+    type Type = bool;
 
     fn get_data(bits: &[u8], start_index: usize, remain_bits: usize) -> Self::Type {
-        B8::get_data(bits, start_index, remain_bits)
+        let ret = B8::get_data(bits, start_index, remain_bits);
+        ret == 1
     }
 
     fn set_data(bits: &mut[u8], start_index: usize, remain_bits: usize, arg: Self::Type) {
-        B8::set_data(bits, start_index, remain_bits, arg)
+        if arg {
+            B8::set_data(bits, start_index, remain_bits, 1)
+        } else {
+            B8::set_data(bits, start_index, remain_bits, 0)
+        }
+       
     }
 }
 

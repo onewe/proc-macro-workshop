@@ -1,5 +1,5 @@
 use proc_macro2::TokenStream;
-use quote::format_ident;
+use quote::{format_ident, spanned::Spanned};
 use syn::parse::Parse;
 
 pub struct BitField {
@@ -38,6 +38,7 @@ impl BitField {
         let getter_fn_methods = gen_get_fn(fields)?;
         let setter_fn_methods = gen_set_fn(fields)?;
         let new_fn_method = gen_new_fn()?;
+        let assert_field_bits_total_expr = gen_assert_field_bits_total_expr(fields)?;
         
         
        let token_stream =  quote::quote! {
@@ -56,6 +57,7 @@ impl BitField {
 
             const _:() = {
                 struct _AssertMod8 where <bitfield::checks::BitSizeMod<{TOTAL_SIZE % 8}> as bitfield::checks::AssertMod8>::CheckType: bitfield::checks::TotalSizeIsMultipleOfEightBits;
+                #assert_field_bits_total_expr
             };
            
             
@@ -64,6 +66,66 @@ impl BitField {
 
         Ok(token_stream)
     }
+}
+
+
+fn gen_assert_field_bits_total_expr(fields: &syn::Fields) -> syn::Result<TokenStream> {
+    
+    let mut token_streams = TokenStream::default();
+
+    for field in fields {
+        let field_ident = field.ident.as_ref();
+        let Some(field_ident) = field_ident else {
+            continue;
+        };
+
+        let assert_ident = format_ident!("_assert_{}_bits", field_ident);
+       
+
+        let field_ty = &field.ty;
+        let field_attrs = &field.attrs;
+
+        for field_attr in field_attrs {
+            
+            let meta = &field_attr.meta;
+
+            let syn::Meta::NameValue(meta) = meta else {
+                continue;
+            };
+
+            let path = meta.path.get_ident(); 
+            let Some(path) = path else {
+                continue;
+            };
+            let ident = path.to_string();
+
+            if ident.ne("bits") {
+                continue;
+            }
+
+            let meta_value_expr = &meta.value;
+
+            let span = meta_value_expr.__span();
+
+            let syn::Expr::Lit(lit_expr) = meta_value_expr else {
+                continue;
+            };
+
+            let syn::Lit::Int(int_lit) = &lit_expr.lit else {
+                continue;
+            };
+
+            let bits_total = int_lit.base10_parse::<usize>()?;
+
+            let token_stream = quote::quote_spanned!{span=>
+                let #assert_ident: [u8;#bits_total] = [0u8;<#field_ty as bitfield::Specifier>::BITS];
+            };
+            token_streams.extend(token_stream);
+            break;
+        }
+    }
+
+    Ok(token_streams)
 }
 
 fn gen_const_size_expr(fields: &syn::Fields) -> syn::Result<TokenStream> {
@@ -245,4 +307,3 @@ fn gen_new_fn() -> syn::Result<TokenStream> {
 
     Ok(token_stream)
 }
-

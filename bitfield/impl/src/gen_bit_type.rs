@@ -44,20 +44,24 @@ impl BTypeGenerator {
                     fn get_data(bits: &[u8], mut start_index: usize, mut remain_bits: usize) -> Self::Type {
 
                         let mut ret_number = Self::Type::MIN;
-
+                        let mut offset = 0;
                         while remain_bits > 0 {
                             let byte_mul = start_index / 8;
                             let byte_mod = start_index % 8;
                     
                             let element = bits[byte_mul];
+
+                       
                     
                             let element = if byte_mod == 0 {
                                 if remain_bits >= 8 {
+                                    offset = 8;
                                     remain_bits -= 8;
                                     start_index += 8;
                                     element
                                 } else {
                                     let element = element >> (8 - remain_bits);
+                                    offset = remain_bits;
                                     remain_bits -= remain_bits;
                                     start_index += remain_bits;
                                     element
@@ -68,9 +72,11 @@ impl BTypeGenerator {
         
                                 if remain_bits <= (8 - byte_mod) {
                                     element = element >> (8 - remain_bits - byte_mod);
+                                    offset = remain_bits;
                                     remain_bits -= remain_bits;
                                     start_index += remain_bits;
                                 } else {
+                                    offset = 8;
                                     remain_bits -= 8 - byte_mod;
                                     start_index += 8 - byte_mod;
                                 }
@@ -78,18 +84,16 @@ impl BTypeGenerator {
                                 element
                             };
         
-                            let offset = 8 - element.leading_zeros();
-        
                             ret_number = ret_number << offset;
         
                             ret_number = ret_number | element as Self::Type;
         
                         }
-                    
                         ret_number
                     }
                     
                     fn set_data(bits: &mut[u8], mut start_index: usize, mut remain_bits: usize, mut arg: Self::Type) {
+                    
                         while remain_bits > 0 {
                             let byte_mul = start_index / 8;
                             let byte_mod = start_index % 8;
@@ -104,7 +108,7 @@ impl BTypeGenerator {
                                 };
                                 let offset = remain_bits - require_bits;
                                 *element = (*element) | (((arg >> offset) as u8) << (8 - require_bits));
-        
+
                                 let mask = !(Self::Type::MAX << offset);
                                 arg = arg & mask;
                                 
@@ -115,12 +119,14 @@ impl BTypeGenerator {
                                 if remain_bits <= (8 - byte_mod) {
                                     let offset = 8 - byte_mod - remain_bits;
                                     *element = (*element) | (arg << offset) as u8;
+
                                     start_index += remain_bits;
                                     remain_bits -= remain_bits;
                                 } else {
                                     let require_bits = 8 - byte_mod;
                                     let offset = remain_bits - require_bits;
                                     *element = (*element) | (arg >> offset) as u8;
+                                    
         
                                     let mask = !(Self::Type::MAX << offset);
                                     arg = arg & mask;
